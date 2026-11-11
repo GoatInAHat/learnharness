@@ -104,7 +104,7 @@ export async function startVideo(id: string, chatId: string, download: boolean, 
       work = await fsp.mkdtemp(path.join(root, "render-"));
       const source = path.join(work, "scene.tsx"); const output = path.join(work, "video.mp4");
       await fsp.writeFile(source, composition(job.input as VideoPlan));
-      await run(binary, ["render", source, "-o", output], work, AbortSignal.any([controller.signal, AbortSignal.timeout(180_000)]), { NODE_ENV: "production", RAEA_OFFLINE: "1", RAEA_NO_TREE: "1", RAEA_ENV_FILE: path.join(work, "env"), RAEA_CACHE: path.join(work, "cache"), ...(process.platform === "win32" ? { SystemRoot: process.env.SystemRoot || "C:\\Windows", TEMP: work, TMP: work } : {}) });
+      await run(binary, ["render", source, "-o", output], work, AbortSignal.any([controller.signal, AbortSignal.timeout(180_000)]), { NODE_ENV: "production", RAEA_OFFLINE: "1", RAEA_NO_TREE: "1", RAEA_ENV_FILE: path.join(work, "env"), RAEA_CACHE: path.join(work, "cache"), ...(process.platform === "win32" ? { SystemRoot: process.env.SystemRoot || "C:\\Windows", TEMP: work, TMP: work } : {}), ...((process.platform === "win32" || process.platform === "linux") && process.env.WGPU_BACKEND === "vulkan" ? { WGPU_BACKEND: "vulkan" } : {}) });
       controller.signal.throwIfAborted();
       if (controllers.get(id) !== controller || !stores.jobStore.getJob(id)) return;
       const stat = await fsp.lstat(output);
