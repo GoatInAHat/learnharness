@@ -1,0 +1,59 @@
+name: Raea platform qualification
+
+on:
+  push:
+    branches: [test/raea-crossplatform-qualification]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      NODE_ENV: test
+      WGPU_BACKEND: vulkan
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - run: npm ci
+      - name: Linux software Vulkan and runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y libvulkan1 mesa-vulkan-drivers libasound2t64 libfontconfig1 libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2 libx11-xcb1 xvfb xauth
+      - name: Windows software Vulkan
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Raea RC2 uses the same pinned lavapipe build on its GPU-less Windows release runner.
+          $dir = New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'raea-mesa')
+          $archive = Join-Path $dir.FullName 'mesa.7z'
+          curl.exe --fail --location --silent --show-error --max-time 120 --output $archive 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.4/mesa3d-26.2.4-release-msvc.7z'
+          if ($LASTEXITCODE -ne 0) { throw 'Mesa download failed' }
+          $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          if ($sha -ne '351fc8c8b695878ffb3eaa044b3ead08672a48b1a045e3c3e3975811df0f6695') { throw 'Mesa checksum mismatch' }
+          7z x -y "-o$($dir.FullName)" $archive 'x64/vulkan_lvp.dll' 'x64/lvp_icd.x86_64.json'
+          if ($LASTEXITCODE -ne 0) { throw 'Mesa extraction failed' }
+          $icd = Join-Path $dir.FullName 'x64\lvp_icd.x86_64.json'
+          if (!(Test-Path -LiteralPath $icd)) { throw 'Missing Vulkan driver manifest' }
+          # The Vulkan loader ignores VK_DRIVER_FILES for the runner's elevated user.
+          $drivers = 'HKLM:\SOFTWARE\Khronos\Vulkan\Drivers'
+          New-Item -Path $drivers -Force | Out-Null
+          New-ItemProperty -Path $drivers -Name $icd -PropertyType DWord -Value 0 -Force | Out-Null
+      - name: Download, render, and seek in Electron on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node --import tsx scripts/qualify-raea-platform.mjs
+      - name: Download, render, and seek in Electron on Windows
+        if: runner.os == 'Windows'
+        run: node --import tsx scripts/qualify-raea-platform.mjs
